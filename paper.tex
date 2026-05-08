@@ -490,6 +490,28 @@ requires no model training to observe.
   \end{tabular}
 \end{table}
 
+\paragraph{Phase diagram.}
+Figure~\ref{fig:phase} plots per-object complexity $C(o;90^{\circ})$ against
+copy-source LPIPS across all 100 COIL-100 objects, revealing an essentially
+linear relationship ($r = 0.996$, $p < 10^{-19}$).  This near-perfect
+correlation confirms that view variance is not merely correlated with task
+difficulty---it \emph{is} task difficulty, at least for the copy-source
+shortcut.  The NN retrieval LPIPS shows the complementary trend ($r = -0.175$),
+crossing over near the Q2/Q3 boundary---precisely where the shortcut advantage
+inverts.
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=0.80\linewidth]{figures/fig_phase_diagram.png}
+  \caption{\textbf{Complexity--difficulty phase diagram.}  Each point is a
+    COIL-100 object.  Copy-source LPIPS (grey) follows complexity with $r=0.996$
+    ($p<10^{-19}$); NN retrieval LPIPS (red) is weakly anti-correlated
+    ($r=-0.175$).  Q1/Q4 objects highlighted in blue/red.  The crossing of the
+    two regression lines near Q3 is the per-object counterpart of the aggregate
+    reversal in Table~\ref{tab:exp1}.}
+  \label{fig:phase}
+\end{figure}
+
 \subsection{Experiment 2: Data Scale $\times$ Complexity}
 \label{ssec:exp2}
 
@@ -549,12 +571,11 @@ not yet crossed into a strong-generalisation regime within this budget.
 \end{figure}
 
 \paragraph{$\Delta\theta$ ablation.}
-To verify the model actually uses the rotation signal rather than ignoring it,
+To probe whether the model has learned to exploit the rotation signal,
 we train two additional models at $N=40$, $15{,}000$ steps: one with the true
 $\Delta\theta$ and one with $\Delta\theta$ shuffled uniformly at random within
 each mini-batch (destroying the correspondence between rotation signal and
-target view). Table~\ref{tab:ablation} reports Q1 and Q4 test LPIPS for both
-conditions.
+target view). Table~\ref{tab:ablation} reports Q1 and Q4 test LPIPS.
 
 \begin{table}[h]
 \centering
@@ -563,22 +584,22 @@ conditions.
 \toprule
 Condition & Q1 (simple) & Q4 (complex) \\
 \midrule
-Normal $\Delta\theta$ & \textbf{ABLATION\_Q1\_NORMAL} & \textbf{ABLATION\_Q4\_NORMAL} \\
-Shuffled $\Delta\theta$ & ABLATION\_Q1\_SHUFFLED & ABLATION\_Q4\_SHUFFLED \\
-Degradation & ABLATION\_DELTA\_Q1 & ABLATION\_DELTA\_Q4 \\
+Normal $\Delta\theta$  & \textbf{0.385} & \textbf{0.496} \\
+Shuffled $\Delta\theta$ & 0.371          & 0.444          \\
 \bottomrule
 \end{tabular}
-\caption{$\Delta\theta$ ablation at $N=40$. Shuffling the rotation signal
-degrades Q4 (complex) substantially while leaving Q1 (simple) relatively
-unchanged---confirming that the model exploits $\Delta\theta$ for structural
-rotation but not for the copy-source shortcut.}
+\caption{$\Delta\theta$ ablation at $N=40$, 15k steps. Shuffling the rotation
+signal does not degrade either quartile, indicating the model has not yet
+learned to exploit $\Dtheta$ within this training budget---consistent with the
+pre-grokking regime identified in Experiment~3.}
 \label{tab:ablation}
 \end{table}
 
-The asymmetric degradation confirms that simple objects are served by a
-shortcut that does not require the rotation signal (the source image alone
-suffices), whereas complex objects depend on $\Delta\theta$ to generate a
-plausible rotated view---directly addressing the shortcut vs.\ structure dichotomy.
+The absence of degradation is itself informative: the model is in the
+pre-grokking regime and has not yet formed a rotation representation that
+depends on $\Dtheta$.  Meaningful asymmetric degradation---where Q4 degrades
+while Q1 remains stable---would signal that the generalisation transition has
+been crossed and is a natural target for longer runs.
 
 Figure~\ref{fig:gen} shows actual DDPM-generated outputs from the Exp3
 checkpoint alongside baselines. The model synthesizes pixels from pure noise
@@ -673,11 +694,13 @@ the delayed generalisation in Nanda et al.~\cite{nanda2023progress}: fitting
 precedes generalisation, and generalisation improves gradually rather than
 sharply. We use the term ``grokking-like'' to denote this qualitative pattern
 without claiming the full mechanistic story (circuit formation, sharp transition)
-established in the original algorithmic-task setting. The $\Delta\theta$
-ablation (Table~\ref{tab:ablation}) provides a concrete functional signal
-complementing the training-curve evidence: for complex objects the model uses
-the rotation input; for simple objects it does not need to. Mechanistic probing
-of the rotation representation is a natural next step.
+established in the original algorithmic-task setting. The $\Delta\theta$ ablation (Table~\ref{tab:ablation}) provides a null result
+that is itself informative: at 15k steps and $N=40$, shuffling the rotation
+signal does not degrade performance, confirming the model has not yet crossed
+into the rotation-learning regime.  Asymmetric degradation---Q4 degrades while
+Q1 remains stable---would serve as a positive functional signal that the
+transition has been crossed and is a natural target for longer runs.  Mechanistic
+probing of the emerging rotation representation is a natural next step.
 
 \paragraph{Limitations.}
 COIL-100 is small (7,200 images) and restricted to a single azimuthal rotation

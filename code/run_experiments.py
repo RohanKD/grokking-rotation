@@ -507,10 +507,143 @@ def _plot_exp4(df):
 # Main
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def run_dino_retrieval(device):
+    """Replace VGG with DINOv2-ViT-S/14 features for NN retrieval. Compare Q1/Q4."""
+    print("\n=== DINOv2 Retrieval Baseline ===")
+    import torch.hub
+    from torchvision import transforms as T_tfm
+    from data.coil100 import COIL100Dataset
+
+    dino = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14').to(device).eval()
+    dino_tfm = T_tfm.Compose([
+        T_tfm.Resize((224, 224)),
+        T_tfm.ToTensor(),
+        T_tfm.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ])
+    img_tfm = T_tfm.Compose([T_tfm.Resize((IMG_H, IMG_W)), T_tfm.ToTensor()])
+
+    cx = pd.read_csv(RES_DIR / 'complexity_scores.csv')
+    q1 = cx['complexity_feat'].quantile(0.25)
+    q3 = cx['complexity_feat'].quantile(0.75)
+
+    train_ids, test_ids = get_train_test_split(40, seed=42)
+
+    # Build DINOv2 feature library for training objects (source views at angle 0)
+    from data.coil100 import COIL100Dataset
+    lib_feats, lib_obj_ids = [], []
+    for oid in train_ids:
+        img_path = COIL_DIR / f"obj{oid}__0.png"
+        if not img_path.exists():
+            continue
+        from PIL import Image
+        img = Image.open(img_path).convert('RGB')
+        t = dino_tfm(img).unsqueeze(0).to(device)
+        with torch.no_grad():
+            f = dino(t).squeeze(0)
+            f = F.normalize(f, dim=0)
+        lib_feats.append(f)
+        lib_obj_ids.append(oid)
+    lib_feats = torch.stack(lib_feats)  # (N_train, D)
+
+    rows = []
+    ds = COIL100Dataset(str(COIL_DIR), test_ids, angle_delta=DELTA_90,
+                        transform=img_tfm, length=400)
+    loader = torch.utils.data.DataLoader(ds, batch_size=1, shuffle=False)
+
+    from PIL import Image
+    for batch in loader:
+        oid = batch['object_id'].item()
+        src = batch['source'].to(device)
+        tgt = batch['target'].to(device)
+        ang_s = batch['angle_src'].item() if 'angle_src' in batch else 0
+
+        # DINOv2 feature of the source view
+        src_pil = T_tfm.ToPILImage()(src.squeeze(0).cpu())
+        t = dino_tfm(src_pil).unsqueeze(0).to(device)
+        with torch.no_grad():
+            q_feat = F.normalize(dino(t).squeeze(0), dim=0)
+            sims = lib_feats @ q_feat
+            best = sims.argmax().item()
+        nn_oid = lib_obj_ids[best]
+
+        # Retrieved target: same delta from the NN object
+        nn_tgt_path = COIL_DIR / f"obj{nn_oid}__{(ang_s + DELTA_90*5) % 360}.png"
+        if not nn_tgt_path.exists():
+            continue
+        nn_tgt = Image.open(nn_tgt_path).convert('RGB')
+        nn_tgt_t = img_tfm(nn_tgt).unsqueeze(0).to(device)
+
+        d_nn = perceptual_dist(nn_tgt_t, tgt, device)
+        d_copy = perceptual_dist(src, tgt, device)
+
+        row_c = cx[cx['obj_id'] == oid]['complexity_feat']
+        v = row_c.values[0] if len(row_c) else 0.0
+        q = 'Q1' if v <= q1 else ('Q4' if v > q3 else 'Q2Q3')
+        rows.append({'obj_id': oid, 'quartile': q, 'copy_src': d_copy, 'dino_nn': d_nn})
+
+    df = pd.DataFrame(rows)
+    df.to_csv(RES_DIR / 'dino_retrieval_baseline.csv', index=False)
+    for q in ['Q1', 'Q4']:
+        sub = df[df['quartile'] == q]
+        if len(sub):
+            print(f"  {q}: copy_src={sub['copy_src'].mean():.3f}  dino_nn={sub['dino_nn'].mean():.3f}")
+    return df
+
+
+def run_degraded_baseline(device):
+    """Train model with source image zeroed (delta-only conditioning). Compare vs full model."""
+    print("\n=== Degraded Baseline: Delta-Only Conditioning ===")
+    train_ids, test_ids = get_train_test_split(40, seed=42)
+
+    rows = []
+    for condition, zero_src in [('full', False), ('delta_only', True)]:
+        tag = f'degraded_{condition}'
+        print(f"\n  Training {condition} ...")
+        # Patch dataset to zero out source images if needed
+        from torchvision import transforms as T_tfm
+        img_tfm = T_tfm.Compose([T_tfm.Resize((IMG_H, IMG_W)), T_tfm.ToTensor()])
+        model = ConditionalUNet().to(device)
+        opt   = AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+        sched = CosineAnnealingLR(opt, T_max=15000, eta_min=LR*0.1)
+
+        from data.coil100 import COIL100Dataset
+        from torch.utils.data import DataLoader
+        ds = COIL100Dataset(str(COIL_DIR), train_ids, angle_delta=None,
+                            transform=img_tfm, length=max(len(train_ids)*72, BATCH*4))
+        loader = DataLoader(ds, batch_size=BATCH, shuffle=True, num_workers=4,
+                            pin_memory=True, drop_last=True)
+
+        step = 0
+        pbar = tqdm(total=15000, desc=tag, dynamic_ncols=True)
+        while step < 15000:
+            for batch in loader:
+                if step >= 15000: break
+                src = batch['source'].to(device)
+                tgt = batch['target'].to(device)
+                dt  = batch['delta_theta'].to(device)
+                if zero_src:
+                    src = torch.zeros_like(src)
+                loss = p_losses(model, tgt, src, dt, device)
+                opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+                step += 1
+                pbar.update(1)
+        pbar.close()
+
+        scores = evaluate(model, test_ids, device)
+        rows.append({'condition': condition, 'lpips_q1': scores['Q1'], 'lpips_q4': scores['Q4']})
+        print(f"  [{condition}] Q1={scores['Q1']:.3f}  Q4={scores['Q4']:.3f}")
+
+    df = pd.DataFrame(rows)
+    df.to_csv(RES_DIR / 'degraded_baseline_real.csv', index=False)
+    print("\nDegraded baseline results:")
+    print(df.to_string(index=False))
+    return df
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='cuda:0')
-    parser.add_argument('--exp', type=int, default=0, help='0=all, 2/3/4/5=specific')
+    parser.add_argument('--exp', type=int, default=0, help='0=all, 2/3/4/5=specific; 6=dino, 7=degraded')
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -521,5 +654,7 @@ if __name__ == '__main__':
     if args.exp in (0, 3): run_exp3(device)
     if args.exp in (0, 4): run_exp4(device)
     if args.exp in (0, 5): run_exp5_ablation(device)
+    if args.exp == 6: run_dino_retrieval(device)
+    if args.exp == 7: run_degraded_baseline(device)
 
     print("\nAll done. Figures saved to", FIG_DIR)
