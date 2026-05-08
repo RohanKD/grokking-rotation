@@ -220,6 +220,30 @@ def run_per_object_curves():
           f"Q4 mean={df[df.quartile=='Q4']['mean_lpips'].mean():.3f}")
 
 
+# ── VAE Exp2: data scale × complexity ────────────────────────────────────────
+@app.function(gpu="A100", volumes={VOL_MOUNT: volume}, timeout=7200)
+def run_vae_exp2():
+    """ConditionalVAE: data scale × complexity sweep (N=10/40/80, 3 seeds, 15k steps each)."""
+    import torch
+    re = _setup()
+    import vae_experiments as ve
+    torch.manual_seed(42)
+    ve.run_vae_exp2(torch.device("cuda"))
+    volume.commit()
+
+
+# ── VAE Exp3: grokking dynamics + latent circle diagnostic ───────────────────
+@app.function(gpu="A100", volumes={VOL_MOUNT: volume}, timeout=7200)
+def run_vae_exp3():
+    """ConditionalVAE: 30k steps with latent circle logging every 3k steps."""
+    import torch
+    re = _setup()
+    import vae_experiments as ve
+    torch.manual_seed(42)
+    ve.run_vae_exp3(torch.device("cuda"))
+    volume.commit()
+
+
 # ── Run all experiments ───────────────────────────────────────────────────────
 @app.function(gpu="A100", volumes={VOL_MOUNT: volume}, timeout=14400)
 def run_all():
