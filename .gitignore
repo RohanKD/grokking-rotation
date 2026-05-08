@@ -1,0 +1,26 @@
+# Dataset (too large for git)
+coil-100/
+coil100.zip
+
+# Checkpoints
+checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Build artifacts
+*.tar.gz
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# Misc
+.DS_Store

@@ -1,0 +1,10 @@
+torch>=2.0
+torchvision
+numpy
+scipy
+tqdm
+pyyaml
+lpips
+scikit-image
+matplotlib
+pandas

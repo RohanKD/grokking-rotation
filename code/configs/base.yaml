@@ -1,0 +1,37 @@
+# Base configuration for conditional DDPM rotation generalization study
+# COIL-100: 100 objects x 72 images, 5-degree intervals, 128x128 pixels
+
+diffusion:
+  T: 1000                    # Number of diffusion timesteps
+  beta_schedule: cosine      # Noise schedule type
+  ddim_steps: 50             # DDIM inference steps
+
+model:
+  base_channels: 64          # Base channel width for U-Net
+  n_blocks: 4                # Number of encoder/decoder scales
+  time_emb_dim: 256          # Dimensionality of time embedding
+  cond_emb_dim: 256          # Dimensionality of rotation conditioning embedding
+  image_size: 128            # Input/output spatial resolution
+
+training:
+  lr: 2.0e-4                 # Adam learning rate
+  batch_size: 64             # Training batch size
+  total_steps: 200000        # Total gradient update steps
+  cosine_schedule: true      # Use cosine LR annealing
+  grad_clip: 1.0             # Gradient clipping norm
+  ema_decay: 0.9999          # EMA decay for inference model
+
+data:
+  train_objects: 80          # Number of objects in training split
+  test_objects: 20           # Number of objects in test split
+  seed: 42                   # Random seed for reproducibility
+  num_workers: 4             # DataLoader worker processes
+  image_size: 128            # Image resolution
+
+logging:
+  log_every: 100             # Log train loss every N steps
+  eval_every: 5000           # Evaluate on test set every N steps
+  save_every: 10000          # Save checkpoint every N steps
+
+complexity:
+  alpha_deg: 90              # Angular gap for view-variance metric C(o; alpha)
