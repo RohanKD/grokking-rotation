@@ -270,7 +270,7 @@ def evaluate(model, test_ids, device, n_samples=80, delta_idx=DELTA_90):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def train(train_ids, test_ids, total_steps, device, tag, eval_every=EVAL_EVERY,
-          delta_idx=None, save_ckpt=False):
+          delta_idx=None, save_ckpt=False, shuffle_delta=False):
     from torchvision import transforms as T_tfm
     img_tfm = T_tfm.Compose([T_tfm.Resize((IMG_H, IMG_W)), T_tfm.ToTensor()])
     model = ConditionalUNet().to(device)
@@ -295,6 +295,8 @@ def train(train_ids, test_ids, total_steps, device, tag, eval_every=EVAL_EVERY,
             src = batch['source'].to(device)
             tgt = batch['target'].to(device)
             dt  = batch['delta_theta'].to(device)
+            if shuffle_delta:
+                dt = dt[torch.randperm(dt.shape[0], device=device)]
             loss = p_losses(model, tgt, src, dt, device)
             opt.zero_grad(); loss.backward(); opt.step(); sched.step()
             train_losses.append(loss.item())
@@ -414,6 +416,26 @@ def _plot_exp3(log):
     print("fig4.png updated with real results.")
 
 
+def run_exp5_ablation(device):
+    """Δθ ablation: compare normal vs shuffled rotation signal at N=40."""
+    print("\n=== Experiment 5: Δθ Ablation ===")
+    train_ids, test_ids = get_train_test_split(40, seed=42)
+    rows = []
+    for condition, shuffle in [('normal', False), ('shuffled', True)]:
+        tag = f'exp5_{condition}'
+        print(f"\n  Training with Δθ {condition} ...")
+        model, _ = train(train_ids, test_ids, total_steps=15000, device=device,
+                         tag=tag, eval_every=15000, shuffle_delta=shuffle)
+        scores = evaluate(model, test_ids, device)
+        rows.append({'condition': condition, 'lpips_q1': scores['Q1'], 'lpips_q4': scores['Q4']})
+        tqdm.write(f"  [{condition}] Q1={scores['Q1']:.3f}  Q4={scores['Q4']:.3f}")
+    df = pd.DataFrame(rows)
+    df.to_csv(RES_DIR / 'exp5_ablation_real.csv', index=False)
+    print("\nExp5 results:")
+    print(df.to_string(index=False))
+    return df
+
+
 def run_exp4(device):
     """Angle generalization: train on 90° only, test interpolation + extrapolation."""
     print("\n=== Experiment 4: Angle Generalization ===")
@@ -488,7 +510,7 @@ def _plot_exp4(df):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='cuda:0')
-    parser.add_argument('--exp', type=int, default=0, help='0=all, 2/3/4=specific')
+    parser.add_argument('--exp', type=int, default=0, help='0=all, 2/3/4/5=specific')
     args = parser.parse_args()
 
     torch.manual_seed(42)
@@ -498,5 +520,6 @@ if __name__ == '__main__':
     if args.exp in (0, 2): run_exp2(device)
     if args.exp in (0, 3): run_exp3(device)
     if args.exp in (0, 4): run_exp4(device)
+    if args.exp in (0, 5): run_exp5_ablation(device)
 
     print("\nAll done. Figures saved to", FIG_DIR)
